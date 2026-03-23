@@ -44,6 +44,33 @@
             color: white; padding: 10px; border-radius: 6px; font-family: monospace;
         }
 
+        #download-btn {
+            width: 100%;
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-bottom: 20px;
+            transition: opacity 0.2s;
+        }
+        #download-btn:hover { opacity: 0.9; }
+
+        /* Privacy Tab Styles */
+        .info-footer {
+            margin-top: auto; padding-top: 20px; border-top: 1px solid var(--border);
+        }
+        .privacy-card { 
+            background: rgba(16, 185, 129, 0.1); 
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            padding: 12px; 
+            border-radius: 8px;
+        }
+        .privacy-card h4 { color: var(--primary); margin: 0 0 8px 0; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; }
+        .privacy-card p { margin: 0; font-size: 0.75rem; color: var(--text-dim); line-height: 1.4; }
+
         .slider-header { display: flex; justify-content: space-between; align-items: center; }
         .val-badge { background: var(--accent); font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; }
 
@@ -60,6 +87,9 @@
 
 <div class="sidebar">
     <h2 style="margin: 0 0 10px 0; color: var(--primary);">OCR Lab</h2>
+    
+    <button id="download-btn">Save as .html</button>
+
     <div id="status-pill">Ready: Upload File</div>
 
     <div class="control-group">
@@ -105,6 +135,13 @@
     <div class="control-group">
         <label>Live AI View</label>
         <canvas id="crop-preview"></canvas>
+    </div>
+
+    <div class="info-footer">
+        <div class="privacy-card">
+            <h4>Privacy Details</h4>
+            <p><strong>100% Local:</strong> Files never leave your browser. AI engine runs on your hardware. Zero tracking, no cloud uploads, and fully functional offline.</p>
+        </div>
     </div>
 </div>
 
@@ -152,7 +189,6 @@
         statusPill.innerText = "Loading File...";
 
         if (file.type === "application/pdf") {
-            // PDF LOGIC
             const pdf = await pdfjsLib.getDocument(await file.arrayBuffer()).promise;
             for (let i = 1; i <= pdf.numPages; i++) {
                 const page = await pdf.getPage(i);
@@ -162,7 +198,6 @@
                 });
             }
         } else {
-            // IMAGE LOGIC
             const img = new Image();
             img.onload = () => {
                 createPageUI(img.width, img.height, (ctx) => {
@@ -256,6 +291,19 @@
         const t = document.getElementById('toast');
         t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 1500);
     }
+
+    document.getElementById('download-btn').addEventListener('click', () => {
+        const htmlContent = document.documentElement.outerHTML;
+        const blob = new Blob([htmlContent], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'Precision-OCR-Lab.html';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    });
 </script>
 
 </body>
