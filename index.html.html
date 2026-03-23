@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Precision OCR Lab (Image + PDF)</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+
+    <style>
+        :root { 
+            --primary: #10b981; 
+            --bg: #0f172a; 
+            --panel: #1e293b; 
+            --border: #334155;
+            --text-dim: #94a3b8;
+            --accent: #3b82f6;
+        }
+        
+        body { 
+            font-family: 'Inter', system-ui, sans-serif; 
+            background: var(--bg); color: white; margin: 0; 
+            display: flex; height: 100vh; overflow: hidden;
+        }
+
+        .sidebar {
+            width: 350px; background: var(--panel); border-right: 1px solid var(--border);
+            display: flex; flex-direction: column; padding: 20px;
+            box-shadow: 10px 0 25px rgba(0,0,0,0.2); z-index: 1001; overflow-y: auto;
+        }
+
+        .main-content {
+            flex-grow: 1; overflow-y: auto; display: flex; flex-direction: column;
+            align-items: center; padding: 20px; position: relative;
+        }
+
+        .control-group { margin-bottom: 25px; padding-bottom: 15px; border-bottom: 1px solid #2d3748; }
+        .control-group label { display: block; font-size: 0.9rem; font-weight: 600; color: white; margin-bottom: 4px; }
+        .control-desc { font-size: 0.75rem; color: var(--text-dim); margin-bottom: 10px; line-height: 1.3; }
+        
+        input[type="text"], select {
+            width: 100%; background: #0f172a; border: 1px solid var(--border);
+            color: white; padding: 10px; border-radius: 6px; font-family: monospace;
+        }
+
+        .slider-header { display: flex; justify-content: space-between; align-items: center; }
+        .val-badge { background: var(--accent); font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; }
+
+        #viewer-container { display: flex; flex-direction: column; gap: 40px; width: 100%; align-items: center; }
+        .page-wrapper { position: relative; background: white; box-shadow: 0 0 40px rgba(0,0,0,0.6); cursor: crosshair; }
+        #selection-rect { position: absolute; border: 2px solid var(--primary); background: rgba(16, 185, 129, 0.2); pointer-events: none; display: none; z-index: 9999; }
+
+        #status-pill { background: #064e3b; color: var(--primary); padding: 6px 15px; border-radius: 99px; font-size: 0.8rem; font-weight: bold; margin-bottom: 20px; text-align: center;}
+        #toast { position: fixed; bottom: 30px; right: 30px; background: var(--primary); color: white; padding: 12px 24px; border-radius: 8px; font-weight: bold; display: none; z-index: 10000; }
+        #crop-preview { width: 100%; background: #000; border: 1px solid var(--border); margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+<div class="sidebar">
+    <h2 style="margin: 0 0 10px 0; color: var(--primary);">OCR Lab</h2>
+    <div id="status-pill">Ready: Upload File</div>
+
+    <div class="control-group">
+        <label>1. Select Input</label>
+        <p class="control-desc">Supports PDF, JPG, PNG, and Screenshots.</p>
+        <input type="file" id="file-input" accept="application/pdf, image/*">
+    </div>
+
+    <div class="control-group">
+        <label>2. Whitelist Characters</label>
+        <p class="control-desc">Limits the AI search to these specific symbols/letters.</p>
+        <input type="text" id="whitelist" value='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";:/.,-?!()$@#%&* '>
+    </div>
+
+    <div class="control-group">
+        <div class="slider-header">
+            <label>3. Precision Zoom</label>
+            <span class="val-badge" id="scale-val">3.0x</span>
+        </div>
+        <p class="control-desc">Increases clarity for small text.</p>
+        <input type="range" id="scale-slider" min="1" max="5" step="0.5" value="3">
+    </div>
+
+    <div class="control-group">
+        <div class="slider-header">
+            <label>4. B&W Threshold</label>
+            <span class="val-badge" id="thresh-val">190</span>
+        </div>
+        <p class="control-desc">Higher = Thinner (fixes bold). Lower = Thicker (fixes faint text).</p>
+        <input type="range" id="thresh-slider" min="50" max="250" step="5" value="190">
+    </div>
+
+    <div class="control-group">
+        <label>5. Engine Mode (PSM)</label>
+        <p class="control-desc">6: Paragraphs | 7: Single Lines | 10: Single Characters.</p>
+        <select id="psm-mode">
+            <option value="6" selected>6 - Single Text Block</option>
+            <option value="7">7 - Single Line</option>
+            <option value="10">10 - Single Character</option>
+        </select>
+    </div>
+
+    <div class="control-group">
+        <label>Live AI View</label>
+        <canvas id="crop-preview"></canvas>
+    </div>
+</div>
+
+<div class="main-content">
+    <div id="viewer-container"></div>
+</div>
+
+<div id="selection-rect"></div>
+<div id="toast">Copied to Clipboard!</div>
+
+<script>
+    const pdfjsLib = window['pdfjs-dist/build/pdf'];
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+
+    const fileInput = document.getElementById('file-input');
+    const viewer = document.getElementById('viewer-container');
+    const statusPill = document.getElementById('status-pill');
+    const selRect = document.getElementById('selection-rect');
+    const cropPreview = document.getElementById('crop-preview');
+    
+    const scaleSlider = document.getElementById('scale-slider');
+    const threshSlider = document.getElementById('thresh-slider');
+    const whitelistInput = document.getElementById('whitelist');
+    const psmSelect = document.getElementById('psm-mode');
+
+    let worker = null;
+    let isDrawing = false;
+    let startX, startY;
+    let currentActiveWrapper = null;
+
+    scaleSlider.oninput = () => document.getElementById('scale-val').innerText = scaleSlider.value + 'x';
+    threshSlider.oninput = () => document.getElementById('thresh-val').innerText = threshSlider.value;
+
+    async function initTesseract() {
+        statusPill.innerText = "Loading AI Engine...";
+        worker = await Tesseract.createWorker('eng');
+        statusPill.innerText = "Engine Active";
+    }
+    initTesseract();
+
+    fileInput.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        viewer.innerHTML = "";
+        statusPill.innerText = "Loading File...";
+
+        if (file.type === "application/pdf") {
+            // PDF LOGIC
+            const pdf = await pdfjsLib.getDocument(await file.arrayBuffer()).promise;
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const viewport = page.getViewport({ scale: 2.0 });
+                createPageUI(viewport.width, viewport.height, (ctx) => {
+                    return page.render({ canvasContext: ctx, viewport }).promise;
+                });
+            }
+        } else {
+            // IMAGE LOGIC
+            const img = new Image();
+            img.onload = () => {
+                createPageUI(img.width, img.height, (ctx) => {
+                    ctx.drawImage(img, 0, 0);
+                    return Promise.resolve();
+                });
+            };
+            img.src = URL.createObjectURL(file);
+        }
+        statusPill.innerText = "✅ Done. Draw boxes.";
+    });
+
+    async function createPageUI(width, height, renderTask) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'page-wrapper';
+        wrapper.style.width = width + 'px';
+        wrapper.style.height = height + 'px';
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height;
+        wrapper.appendChild(canvas);
+        viewer.appendChild(wrapper);
+        await renderTask(canvas.getContext('2d'));
+        attachInteraction(wrapper, canvas);
+    }
+
+    function attachInteraction(wrapper, pageCanvas) {
+        wrapper.addEventListener('mousedown', (e) => {
+            isDrawing = true; currentActiveWrapper = wrapper;
+            const rect = wrapper.getBoundingClientRect();
+            startX = e.clientX - rect.left; startY = e.clientY - rect.top;
+            selRect.style.display = 'block';
+        });
+
+        const handleMouseMove = (e) => {
+            if (!isDrawing || currentActiveWrapper !== wrapper) return;
+            const rect = wrapper.getBoundingClientRect();
+            const cx = Math.max(0, Math.min(e.clientX - rect.left, wrapper.clientWidth));
+            const cy = Math.max(0, Math.min(e.clientY - rect.top, wrapper.clientHeight));
+            const w = Math.abs(cx - startX), h = Math.abs(cy - startY);
+            selRect.style.width = w + 'px'; selRect.style.height = h + 'px';
+            selRect.style.left = (Math.min(cx, startX) + rect.left + window.scrollX) + 'px';
+            selRect.style.top = (Math.min(cy, startY) + rect.top + window.scrollY) + 'px';
+        };
+
+        const handleMouseUp = async (e) => {
+            if (!isDrawing || currentActiveWrapper !== wrapper) return;
+            isDrawing = false; selRect.style.display = 'none';
+            const rect = wrapper.getBoundingClientRect();
+            const ex = Math.max(0, Math.min(e.clientX - rect.left, wrapper.clientWidth));
+            const ey = Math.max(0, Math.min(e.clientY - rect.top, wrapper.clientHeight));
+            const x = Math.min(startX, ex), y = Math.min(startY, ey);
+            const w = Math.abs(ex - startX), h = Math.abs(ey - startY);
+            if (w < 5 || h < 5) return;
+
+            statusPill.innerText = "⚡ Scanning...";
+            const currentZoom = parseFloat(scaleSlider.value);
+            const currentThresh = parseInt(threshSlider.value);
+
+            cropPreview.width = w * currentZoom;
+            cropPreview.height = h * currentZoom;
+            const ctx = cropPreview.getContext('2d', { willReadFrequently: true });
+            ctx.drawImage(pageCanvas, x, y, w, h, 0, 0, w * currentZoom, h * currentZoom);
+
+            const imgData = ctx.getImageData(0, 0, cropPreview.width, cropPreview.height);
+            const d = imgData.data;
+            for (let i = 0; i < d.length; i += 4) {
+                const avg = (d[i] + d[i+1] + d[i+2]) / 3;
+                const val = avg < currentThresh ? 0 : 255;
+                d[i] = d[i+1] = d[i+2] = val;
+            }
+            ctx.putImageData(imgData, 0, 0);
+
+            await worker.setParameters({
+                tessedit_char_whitelist: whitelistInput.value,
+                tessedit_pageseg_mode: psmSelect.value
+            });
+
+            const { data: { text } } = await worker.recognize(cropPreview);
+            if (text.trim()) {
+                await navigator.clipboard.writeText(text.trim());
+                showToast();
+            }
+            statusPill.innerText = "✅ Copied.";
+        };
+
+        window.addEventListener('mousemove', handleMouseMove);
+        window.addEventListener('mouseup', handleMouseUp);
+    }
+
+    function showToast() {
+        const t = document.getElementById('toast');
+        t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 1500);
+    }
+</script>
+
+</body>
+</html>
