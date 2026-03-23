@@ -58,7 +58,6 @@
         }
         #download-btn:hover { opacity: 0.9; }
 
-        /* Privacy Tab Styles */
         .info-footer {
             margin-top: auto; padding-top: 20px; border-top: 1px solid var(--border);
         }
@@ -101,7 +100,7 @@
     <div class="control-group">
         <label>2. Whitelist Characters</label>
         <p class="control-desc">Limits the AI search to these specific symbols/letters.</p>
-        <input type="text" id="whitelist" value='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"';:/.,-?!()$@#%&*_®© '>
+        <input type="text" id="whitelist">
     </div>
 
     <div class="control-group">
@@ -171,6 +170,9 @@
     let isDrawing = false;
     let startX, startY;
     let currentActiveWrapper = null;
+
+    // Set the initial whitelist value including the single quote (') correctly
+    whitelistInput.value = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789\"';:/.,-?!()$@#%&*_®© ";
 
     scaleSlider.oninput = () => document.getElementById('scale-val').innerText = scaleSlider.value + 'x';
     threshSlider.oninput = () => document.getElementById('thresh-val').innerText = threshSlider.value;
